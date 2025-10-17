@@ -9,6 +9,47 @@ import cv2
 import imageio
 from tqdm import tqdm
 
+def create_final_image(
+    mapping: List[Dict[str, Any]],
+    image_shape: tuple,
+    output_path: Path,
+    scale: int = 8
+) -> None:
+    """
+    Create the final reconstructed image from the mapping.
+    
+    Args:
+        mapping: Pixel mapping data
+        image_shape: Original image shape (height, width, channels)
+        output_path: Output image path
+        scale: Output scale factor
+    """
+    height, width = image_shape[:2]
+    output_height = height * scale
+    output_width = width * scale
+    
+    # Create blank frame for final image
+    final_image = np.zeros((output_height, output_width, 3), dtype=np.uint8)
+    
+    # Draw each pixel at its final destination position
+    for pixel_data in mapping:
+        dst_x, dst_y = pixel_data['dst_pos']
+        color = pixel_data['color']
+        
+        # Scale position and draw pixel
+        x1 = dst_x * scale
+        y1 = dst_y * scale
+        x2 = x1 + scale
+        y2 = y1 + scale
+        
+        # Fill rectangle with pixel color
+        final_image[y1:y2, x1:x2] = color
+    
+    # Save the image
+    final_image_bgr = cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(output_path), final_image_bgr)
+    
+    return final_image
 
 def create_animation(
     mapping: List[Dict[str, Any]],
