@@ -31,7 +31,7 @@ This tool takes two images and creates a mesmerizing animation where pixels from
 ### Step 1: Clone This Magical Repository
 
 ```bash
-git clone https://github.com/your-username/pixel-permutation-mvp.git
+git clone https://github.com/abesanets/pixel-permutation-mvp.git
 cd pixel-permutation-mvp
 ```
 
@@ -48,7 +48,7 @@ pip install -r requirements.txt
 #### Option A: 🖥️ Web Interface (Recommended for Humans)
 
 ```bash
-python web_interface.py
+python python run_server.py
 ```
 
 Then open your browser to: `http://localhost:5000`
@@ -161,14 +161,6 @@ pixel-permutation-mvp/
 - [ ] WebGL rendering (browser-powered pixel parties)
 - [ ] Face-aware alignment (put eyes where eyes should go)
 - [ ] Real-time parameter tweaking (change settings mid-animation!)
-
-## 🎉 Success Stories from Happy Users
-
-> "I turned my selfie into a pizza and it was the best thing I've done all week!" 🍕
-> - *Probably someone, somewhere*
-
-> "My cat watched the animation for 3 hours. I'm concerned." 😼
-> - *Cat owner, probably*
 
 ## 📜 License
 

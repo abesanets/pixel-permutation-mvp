@@ -1,7 +1,10 @@
 """
 Animation rendering and visualization functions.
 """
-
+import matplotlib
+# Используем бэкенд без GUI ДО импорта pyplot
+matplotlib.use('Agg')  # Важно: ДО импорта plt
+import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Dict, Any
 import numpy as np
@@ -121,6 +124,16 @@ def create_animation(
         
         # Convert back to RGB for imageio
         frames.append(frame)
+    
+    # Add one second of final frame pause
+    final_frame = frames[-1]  # Get the last frame
+    extra_frames = int(fps)   # Number of frames for 1 second
+    for _ in range(extra_frames):
+        frames.append(final_frame.copy())  # Append copies of final frame
+    
+    # Update frame count for output
+    total_frames = len(frames)
+    print(f"   Added {extra_frames} frames for final pause (total: {total_frames})")
     
     # Create animation
     print("   Encoding animation...")
