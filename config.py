@@ -6,14 +6,14 @@ These are used in both CLI (run_mvp.py) and web (web_interface.py) for validatio
 
 # Image processing size (must be square, affects computation time and memory)
 MIN_SIZE = 32
-MAX_SIZE = 256
+MAX_SIZE = 512
 
 # Frames per second for animation
 MIN_FPS = 1
 MAX_FPS = 120
 
 # Animation duration in seconds
-MIN_DURATION = 0.5
+MIN_DURATION = 0.1
 MAX_DURATION = 10.0
 
 # Output scale factor (pixel magnification)

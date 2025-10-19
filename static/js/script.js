@@ -344,9 +344,9 @@ function dataURLToBlob(dataURL) {
 
 function validateParams(params) {
     const validations = [
-        { check: params.size < 32 || params.size > 256, message: 'Image size must be between 32 and 256' },
+        { check: params.size < 32 || params.size > 512, message: 'Image size must be between 32 and 512' },
         { check: params.fps < 1 || params.fps > 60, message: 'FPS must be between 1 and 60' },
-        { check: params.duration < 0.5 || params.duration > 10, message: 'Duration must be between 0.5 and 10 seconds' },
+        { check: params.duration < 1 || params.duration > 10, message: 'Duration must be between 0.1 and 10 seconds' },
         { check: params.scale < 1 || params.scale > 16, message: 'Scale must be between 1 and 16' },
         { check: params.seed < 0 || params.seed > 999999, message: 'Seed must be between 0 and 999999' }
     ];
@@ -690,6 +690,62 @@ function scrollToTop() {
         behavior: 'smooth'
     });
 }
+
+// Функция для скрытия/показа опций масштаба
+function toggleScaleOptions() {
+    const sizeSelect = document.getElementById('size');
+    const scaleSelect = document.getElementById('scale');
+    const selectedSize = parseInt(sizeSelect.value);
+    
+    // Показываем все опции сначала
+    Array.from(scaleSelect.options).forEach(option => {
+        option.style.display = 'block';
+        option.disabled = false;
+    });
+    
+    // Скрываем опции в зависимости от размера
+    if (selectedSize === 256) {
+        // Для 256x256 скрываем 16x
+        const option16x = scaleSelect.querySelector('option[value="16"]');
+        if (option16x) {
+            option16x.style.display = 'none';
+            option16x.disabled = true;
+        }
+    } else if (selectedSize === 512) {
+        // Для 512x512 скрываем 8x и 16x
+        const option8x = scaleSelect.querySelector('option[value="8"]');
+        const option16x = scaleSelect.querySelector('option[value="16"]');
+        
+        if (option8x) {
+            option8x.style.display = 'none';
+            option8x.disabled = true;
+        }
+        if (option16x) {
+            option16x.style.display = 'none';
+            option16x.disabled = true;
+        }
+    }
+    
+    // Если текущее выбранное значение стало недоступным, выбираем максимальное доступное
+    const currentScale = parseInt(scaleSelect.value);
+    const availableOptions = Array.from(scaleSelect.options).filter(opt => !opt.disabled);
+    const availableValues = availableOptions.map(opt => parseInt(opt.value));
+    
+    if (!availableValues.includes(currentScale)) {
+        scaleSelect.value = Math.max(...availableValues).toString();
+    }
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    const sizeSelect = document.getElementById('size');
+    
+    // Устанавливаем обработчик изменения размера
+    sizeSelect.addEventListener('change', toggleScaleOptions);
+    
+    // Инициализируем опции при загрузке
+    toggleScaleOptions();
+});
 
 // Периодическая проверка здоровья сервера
 setInterval(async () => {
