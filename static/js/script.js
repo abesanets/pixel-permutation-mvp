@@ -3,8 +3,10 @@ let sourceImageUrl = null;
 let targetImageUrl = null;
 let cancelRequested = false;
 let statusCheckInterval = null;
+let startTime = 0;
+let totalProcessingTime = 0;
 
-// Инициализация
+// Инициализация приложения
 document.addEventListener('DOMContentLoaded', function () {
     initializeApp();
 });
@@ -14,10 +16,11 @@ function initializeApp() {
     setupEventListeners();
     resetPreview();
     hideAdditionalResults();
+    setupImageModalListeners();
 }
 
 function setupEventListeners() {
-    // Обработчики загрузки изображений через input
+    // Обработчики загрузки изображений
     document.getElementById('source').addEventListener('change', function (e) {
         handleImageUpload(e, 'source');
     });
@@ -48,7 +51,6 @@ function handleImageUpload(event, type) {
     const file = event.target.files[0];
     if (!file) return;
 
-    // Проверяем тип файла
     if (!file.type.startsWith('image/')) {
         showNotification('Please select an image file', 'error');
         return;
@@ -58,14 +60,12 @@ function handleImageUpload(event, type) {
     reader.onload = function (e) {
         updatePreview(type, e.target.result);
         
-        // Сохраняем URL
         if (type === 'source') {
             sourceImageUrl = e.target.result;
         } else {
             targetImageUrl = e.target.result;
         }
         
-        // Сохраняем в localStorage
         saveToLocalStorage(type, e.target.result);
     };
     reader.readAsDataURL(file);
@@ -75,7 +75,6 @@ function updatePreview(type, imageData) {
     const previewElement = document.getElementById(`${type}-preview`);
     const placeholder = document.getElementById(`${type}-placeholder`);
     
-    // Очищаем и создаем новое изображение
     previewElement.innerHTML = `
         <div class="preview-overlay">
             <i class="fas fa-sync-alt"></i>
@@ -86,7 +85,6 @@ function updatePreview(type, imageData) {
     
     previewElement.classList.add('active');
     
-    // Скрываем плейсхолдер
     if (placeholder) {
         placeholder.style.display = 'none';
     }
@@ -128,6 +126,12 @@ function resetPreview() {
     document.getElementById('animation-preview').style.display = 'flex';
     document.getElementById('preview-progress').style.display = 'none';
     document.getElementById('animation-result').style.display = 'none';
+    
+    const progressFill = document.getElementById('progress-fill');
+    if (progressFill) {
+        progressFill.classList.remove('pulsing', 'completed');
+    }
+    
     updateProgress(0, 'Ready to process', 0);
     
     const processBtn = document.getElementById('process-btn');
@@ -167,13 +171,11 @@ function showNotification(message, type = 'error') {
 
     container.appendChild(notification);
 
-    // Ограничиваем количество уведомлений
     const notifications = container.querySelectorAll('.notification');
     if (notifications.length > 3) {
         notifications[0].remove();
     }
 
-    // Автоматическое удаление
     setTimeout(() => {
         if (notification.parentNode) {
             notification.style.animation = 'fadeOut 0.5s ease forwards';
@@ -188,14 +190,42 @@ function showNotification(message, type = 'error') {
 
 function updateProgress(progress, message, time) {
     const progressFill = document.getElementById('progress-fill');
-    const progressPercent = document.getElementById('progress-percent');
     const statusMessage = document.getElementById('status-message');
     const timeCounter = document.getElementById('time-counter');
     
-    if (progressFill) progressFill.style.width = `${progress}%`;
-    if (progressPercent) progressPercent.textContent = `${progress}%`;
-    if (statusMessage) statusMessage.textContent = message;
-    if (timeCounter) timeCounter.textContent = `${time.toFixed(1)}s`;
+    if (progressFill) {
+        progressFill.style.width = `${progress}%`;
+        
+        if (progress > 0 && progress < 100) {
+            progressFill.classList.add('pulsing');
+        } else {
+            progressFill.classList.remove('pulsing');
+        }
+        
+        if (progress === 100) {
+            progressFill.classList.add('completed');
+        }
+    }
+    
+    if (statusMessage) {
+        if (progress < 100 && progress > 5) {
+            statusMessage.innerHTML = `${message} <span class="loading-dots"><span></span><span></span><span></span></span>`;
+        } else {
+            statusMessage.textContent = message;
+        }
+    }
+    
+    if (timeCounter) {
+        timeCounter.textContent = `${time.toFixed(1)}s`;
+        
+        if (time > 30) {
+            timeCounter.style.color = 'var(--warning)';
+        } else if (time > 60) {
+            timeCounter.style.color = 'var(--error)';
+        } else {
+            timeCounter.style.color = 'var(--accent)';
+        }
+    }
 }
 
 async function checkServerHealth() {
@@ -221,22 +251,19 @@ async function startProcessing() {
         console.log('Starting processing...');
         
         cancelRequested = false;
+        startTime = Date.now();
         
-        // Показываем кнопку отмены
         const cancelBtn = document.getElementById('cancel-btn');
         cancelBtn.style.display = 'block';
         cancelBtn.disabled = false;
 
-        // Очищаем предыдущую задачу
         await cleanupTask();
         
-        // Проверяем загруженные изображения
         if (!sourceImageUrl || !targetImageUrl) {
             showNotification('Please upload both source and target images');
             return;
         }
 
-        // Получаем параметры
         const params = {
             size: parseInt(document.getElementById('size').value),
             fps: parseInt(document.getElementById('fps').value),
@@ -246,19 +273,16 @@ async function startProcessing() {
             format: document.getElementById('format').value
         };
 
-        // Валидация параметров
         if (!validateParams(params)) {
             return;
         }
 
-        // Конвертируем DataURL в Blob для отправки
         const sourceBlob = dataURLToBlob(sourceImageUrl);
         const targetBlob = dataURLToBlob(targetImageUrl);
         
         const sourceFile = new File([sourceBlob], 'source.png', { type: 'image/png' });
         const targetFile = new File([targetBlob], 'target.png', { type: 'image/png' });
 
-        // Подготавливаем FormData
         const formData = new FormData();
         formData.append('source', sourceFile);
         formData.append('target', targetFile);
@@ -266,12 +290,10 @@ async function startProcessing() {
             formData.append(key, value);
         });
 
-        // Обновляем UI
         const processBtn = document.getElementById('process-btn');
         processBtn.disabled = true;
         processBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
-        // Показываем прогресс
         document.getElementById('animation-preview').style.display = 'none';
         document.getElementById('preview-progress').style.display = 'block';
         document.getElementById('animation-result').style.display = 'none';
@@ -279,7 +301,6 @@ async function startProcessing() {
         
         updateProgress(5, 'Starting processing...', 0);
 
-        // Отправляем запрос
         console.log('Sending upload request...');
         const response = await fetch('/upload', {
             method: 'POST',
@@ -347,7 +368,6 @@ function checkStatus() {
 
     console.log('Checking status for task:', currentTaskId);
     
-    // Очищаем предыдущий интервал
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
     }
@@ -367,20 +387,24 @@ function checkStatus() {
             const data = await response.json();
             console.log('Status response:', data);
 
+            const elapsedTime = data.time_elapsed || ((Date.now() - startTime) / 1000);
+            totalProcessingTime = elapsedTime;
+
             if (data.status === 'processing') {
                 const adjustedProgress = calculateAdjustedProgress(data.progress);
+                const statusMessage = getStatusMessage(data.progress);
+                
                 updateProgress(
                     adjustedProgress,
-                    `Processing... ${data.progress}%`,
-                    data.time_elapsed || 0
+                    statusMessage,
+                    elapsedTime
                 );
+                
             } else if (data.status === 'completed') {
                 clearInterval(statusCheckInterval);
-                updateProgress(100, 'Processing complete!', data.time_elapsed || 0);
-                setTimeout(() => {
-                    showResults(data.time_elapsed);
-                    scrollToTop();
-                }, 1000);
+                totalProcessingTime = data.time_elapsed || elapsedTime;
+                animateCompletion(totalProcessingTime);
+                
             } else if (data.status === 'error') {
                 clearInterval(statusCheckInterval);
                 showNotification('Processing error: ' + data.error);
@@ -396,20 +420,89 @@ function checkStatus() {
 }
 
 function calculateAdjustedProgress(progress) {
-    if (progress < 30) {
-        return progress * 0.8;
-    } else if (progress < 80) {
-        return 24 + (progress - 30) * 0.7;
+    // Плавная кривая прогресса с реалистичным ускорением
+    if (progress < 15) {
+        return progress * 0.5; // Медленный старт
+    } else if (progress < 40) {
+        return 7.5 + (progress - 15) * 0.7; // Стабильный рост
+    } else if (progress < 70) {
+        return 25 + (progress - 40) * 0.9; // Ускорение
+    } else if (progress < 90) {
+        return 52 + (progress - 70) * 1.3; // Быстрый прогресс
     } else {
-        return 59 + (progress - 80) * 2.05;
+        return 78 + (progress - 90) * 2.2; // Финальный рывок
     }
 }
 
+function getStatusMessage(progress) {
+    const messages = [
+        { threshold: 10, message: "Initializing neural network..." },
+        { threshold: 25, message: "Processing source image..." },
+        { threshold: 40, message: "Analyzing target image..." },
+        { threshold: 55, message: "Calculating pixel mapping..." },
+        { threshold: 75, message: "Generating animation frames..." },
+        { threshold: 90, message: "Finalizing animation..." },
+        { threshold: 100, message: "Processing complete!" }
+    ];
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (progress >= messages[i].threshold) {
+            return messages[i].message;
+        }
+    }
+    return "Starting processing...";
+}
+
+function animateCompletion(totalTime) {
+    const progressFill = document.getElementById('progress-fill');
+    const statusMessage = document.getElementById('status-message');
+    const timeCounter = document.getElementById('time-counter');
+    
+    // Плавное заполнение до 100% с bounce эффектом
+    let startProgress = parseFloat(progressFill.style.width) || 0;
+    const targetProgress = 100;
+    const duration = 1200;
+    const startTime = Date.now();
+    
+    function animate() {
+        const currentTime = Date.now();
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // easing function для плавного завершения
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+        const currentProgress = startProgress + (targetProgress - startProgress) * easeOut;
+        
+        progressFill.style.width = `${currentProgress}%`;
+        timeCounter.textContent = `${totalTime.toFixed(1)}s`;
+        
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        } else {
+            // Финальные анимации
+            progressFill.classList.remove('pulsing');
+            progressFill.classList.add('completed');
+            statusMessage.innerHTML = '<i class="fas fa-check-circle"></i> Processing complete!';
+            
+            setTimeout(() => {
+                showResults(totalTime);
+                scrollToTop();
+            }, 800);
+        }
+    }
+    
+    animate();
+}
+
 function showResults(totalTime) {
-    // Показываем основной результат
     document.getElementById('animation-preview').style.display = 'none';
     document.getElementById('preview-progress').style.display = 'none';
     document.getElementById('animation-result').style.display = 'block';
+    
+    const completionTimeElement = document.getElementById('completion-time');
+    if (completionTimeElement) {
+        completionTimeElement.textContent = `Completed in ${totalTime.toFixed(1)}s`;
+    }
     
     const videoElement = document.getElementById('result-video');
     const downloadBtn = document.getElementById('download-video-btn');
@@ -417,17 +510,16 @@ function showResults(totalTime) {
     videoElement.src = `/result/${currentTaskId}/animation`;
     downloadBtn.href = `/result/${currentTaskId}/animation`;
     
-    // Показываем дополнительные результаты
     showAdditionalResults();
     populateAdditionalResults();
 
-    // Восстанавливаем кнопку процесса
     const processBtn = document.getElementById('process-btn');
     processBtn.disabled = false;
     processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
 
-    // Скрываем кнопку отмены
     document.getElementById('cancel-btn').style.display = 'none';
+    
+    showNotification(`Animation generated successfully in ${totalTime.toFixed(1)} seconds!`, 'success');
 }
 
 function populateAdditionalResults() {
@@ -436,7 +528,11 @@ function populateAdditionalResults() {
     resultsGrid.innerHTML = `
         <div class="result-item">
             <h3><i class="fas fa-image"></i> Final Reconstructed Image</h3>
-            <img src="/result/${currentTaskId}/final_image" alt="Final reconstructed image" onerror="this.style.display='none'">
+            <img src="/result/${currentTaskId}/final_image" 
+                 alt="Final reconstructed image" 
+                 data-caption="Final Reconstructed Image"
+                 data-download="/result/${currentTaskId}/final_image"
+                 onerror="this.style.display='none'">
             <div>
                 <a href="/result/${currentTaskId}/final_image" class="download-btn secondary" download>
                     <i class="fas fa-download"></i> Download PNG
@@ -445,7 +541,11 @@ function populateAdditionalResults() {
         </div>
         <div class="result-item">
             <h3><i class="fas fa-chart-bar"></i> Diagnostic Visualization</h3>
-            <img src="/result/${currentTaskId}/diagnostic" alt="Diagnostic visualization" onerror="this.style.display='none'">
+            <img src="/result/${currentTaskId}/diagnostic" 
+                 alt="Diagnostic visualization" 
+                 data-caption="Diagnostic Visualization"
+                 data-download="/result/${currentTaskId}/diagnostic"
+                 onerror="this.style.display='none'">
             <div>
                 <a href="/result/${currentTaskId}/diagnostic" class="download-btn secondary" download>
                     <i class="fas fa-download"></i> Download PNG
@@ -465,6 +565,65 @@ function populateAdditionalResults() {
             </div>
         </div>
     `;
+    
+    setupImageModalListeners();
+}
+
+function setupImageModalListeners() {
+    const modal = document.getElementById('image-modal');
+    const modalImage = document.getElementById('modal-image');
+    const modalCaption = document.getElementById('modal-caption-text');
+    const modalDownloadBtn = document.getElementById('modal-download-btn');
+    const closeBtn = document.querySelector('.modal-close');
+    
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeModal();
+        }
+    });
+    
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+    
+    const resultImages = document.querySelectorAll('.result-item img');
+    resultImages.forEach(img => {
+        img.addEventListener('click', function() {
+            openModal(this.src, this.getAttribute('data-caption'), this.getAttribute('data-download'));
+        });
+    });
+}
+
+function openModal(imageSrc, caption, downloadUrl) {
+    const modal = document.getElementById('image-modal');
+    const modalImage = document.getElementById('modal-image');
+    const modalCaption = document.getElementById('modal-caption-text');
+    const modalDownloadBtn = document.getElementById('modal-download-btn');
+    
+    modalImage.src = imageSrc;
+    modalCaption.textContent = caption;
+    modalDownloadBtn.href = downloadUrl;
+    
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    
+    setTimeout(() => {
+        modal.classList.add('active');
+    }, 10);
+}
+
+function closeModal() {
+    const modal = document.getElementById('image-modal');
+    
+    modal.classList.remove('active');
+    
+    setTimeout(() => {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }, 300);
 }
 
 async function cancelProcessing() {
@@ -477,16 +636,13 @@ async function cancelProcessing() {
     
     showNotification('Canceling current task...', 'success');
     
-    // Останавливаем проверку статуса
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
         statusCheckInterval = null;
     }
     
-    // Очищаем задачу
     await cleanupTask();
     
-    // Восстанавливаем UI
     cancelRequested = false;
     resetPreview();
     hideAdditionalResults();
