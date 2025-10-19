@@ -4,97 +4,153 @@ let targetImageUrl = null;
 let cancelRequested = false;
 let statusCheckInterval = null;
 
-function setupCancelButton() {
-    const cancelBtn = document.getElementById('cancel-btn');
-    if (!cancelBtn) return;
-    
-    // Очищаем старые обработчики
-    const newCancelBtn = cancelBtn.cloneNode(true);
-    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
-    
-    document.getElementById('cancel-btn').addEventListener('click', function () {
-        cancelRequested = true;
-        const btn = document.getElementById('cancel-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Canceling...';
-        showNotification('Canceling current task...', 'success');
-        
-        // Останавливаем проверку статуса
-        if (statusCheckInterval) {
-            clearInterval(statusCheckInterval);
-            statusCheckInterval = null;
-        }
-        
-        cleanupTask().then(() => {
-            currentTaskId = null;
-            cancelRequested = false;
-            document.getElementById('cancel-btn').style.display = 'none';
-            const processBtn = document.getElementById('process-btn');
-            processBtn.disabled = false;
-            processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
-            updateProgress(0, 'Ready to process', ['Processing canceled by user.'], 0);
-        });
-    });
-}
-
-// Initialize image previews
+// Инициализация
 document.addEventListener('DOMContentLoaded', function () {
-    restoreImagePreviews();
-
-    document.getElementById('source').addEventListener('change', function (e) {
-        handleImagePreview(e, 'source-preview');
-    });
-
-    document.getElementById('target').addEventListener('change', function (e) {
-        handleImagePreview(e, 'target-preview');
-    });
-
-    document.getElementById('process-btn').addEventListener('click', startProcessing);
-    document.getElementById('new-generation-btn').addEventListener('click', cleanup);
-
-    updateProgress(0, 'Ready to process', ['System ready. Upload images and click "Generate Animation" to start.'], 0);
-    setupCancelButton();
+    initializeApp();
 });
 
-function handleImagePreview(event, previewId) {
-    const file = event.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = function (e) {
-            const previewElement = document.getElementById(previewId);
-            previewElement.innerHTML = '';
-            const img = document.createElement('img');
-            img.src = e.target.result;
-            img.className = 'preview-image';
-            previewElement.appendChild(img);
+function initializeApp() {
+    restoreImagePreviews();
+    setupEventListeners();
+    resetPreview();
+    hideAdditionalResults();
+}
 
-            if (previewId === 'source-preview') {
-                sourceImageUrl = e.target.result;
-            } else {
-                targetImageUrl = e.target.result;
-            }
-        };
-        reader.readAsDataURL(file);
+function setupEventListeners() {
+    // Обработчики загрузки изображений через input
+    document.getElementById('source').addEventListener('change', function (e) {
+        handleImageUpload(e, 'source');
+    });
+    
+    document.getElementById('target').addEventListener('change', function (e) {
+        handleImageUpload(e, 'target');
+    });
+
+    // Обработчики клика по превью для замены
+    document.getElementById('source-preview').addEventListener('click', function() {
+        if (this.classList.contains('active')) {
+            document.getElementById('source').click();
+        }
+    });
+
+    document.getElementById('target-preview').addEventListener('click', function() {
+        if (this.classList.contains('active')) {
+            document.getElementById('target').click();
+        }
+    });
+
+    // Обработчики кнопок
+    document.getElementById('process-btn').addEventListener('click', startProcessing);
+    document.getElementById('cancel-btn').addEventListener('click', cancelProcessing);
+}
+
+function handleImageUpload(event, type) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Проверяем тип файла
+    if (!file.type.startsWith('image/')) {
+        showNotification('Please select an image file', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        updatePreview(type, e.target.result);
+        
+        // Сохраняем URL
+        if (type === 'source') {
+            sourceImageUrl = e.target.result;
+        } else {
+            targetImageUrl = e.target.result;
+        }
+        
+        // Сохраняем в localStorage
+        saveToLocalStorage(type, e.target.result);
+    };
+    reader.readAsDataURL(file);
+}
+
+function updatePreview(type, imageData) {
+    const previewElement = document.getElementById(`${type}-preview`);
+    const placeholder = document.getElementById(`${type}-placeholder`);
+    
+    // Очищаем и создаем новое изображение
+    previewElement.innerHTML = `
+        <div class="preview-overlay">
+            <i class="fas fa-sync-alt"></i>
+            <span>Click to change</span>
+        </div>
+        <img src="${imageData}" class="preview-image">
+    `;
+    
+    previewElement.classList.add('active');
+    
+    // Скрываем плейсхолдер
+    if (placeholder) {
+        placeholder.style.display = 'none';
+    }
+}
+
+function saveToLocalStorage(key, data) {
+    try {
+        localStorage.setItem(`pixelFlow_${key}`, data);
+    } catch (e) {
+        console.warn('LocalStorage is not available');
+    }
+}
+
+function getFromLocalStorage(key) {
+    try {
+        return localStorage.getItem(`pixelFlow_${key}`);
+    } catch (e) {
+        console.warn('LocalStorage is not available');
+        return null;
     }
 }
 
 function restoreImagePreviews() {
-    if (sourceImageUrl) {
-        const previewElement = document.getElementById('source-preview');
-        previewElement.innerHTML = '';
-        const img = document.createElement('img');
-        img.src = sourceImageUrl;
-        img.className = 'preview-image';
-        previewElement.appendChild(img);
-    }
+    ['source', 'target'].forEach(type => {
+        const savedImage = getFromLocalStorage(type);
+        if (savedImage) {
+            updatePreview(type, savedImage);
+            
+            if (type === 'source') {
+                sourceImageUrl = savedImage;
+            } else {
+                targetImageUrl = savedImage;
+            }
+        }
+    });
+}
 
-    if (targetImageUrl) {
-        const previewElement = document.getElementById('target-preview');
-        previewElement.innerHTML = '';
-        const img = document.createElement('img');
-        img.src = targetImageUrl;
-        img.className = 'preview-image';
-        previewElement.appendChild(img);
+function resetPreview() {
+    document.getElementById('animation-preview').style.display = 'flex';
+    document.getElementById('preview-progress').style.display = 'none';
+    document.getElementById('animation-result').style.display = 'none';
+    updateProgress(0, 'Ready to process', 0);
+    
+    const processBtn = document.getElementById('process-btn');
+    processBtn.disabled = false;
+    processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
+    
+    const cancelBtn = document.getElementById('cancel-btn');
+    cancelBtn.style.display = 'none';
+    cancelBtn.disabled = false;
+    cancelBtn.innerHTML = '<i class="fas fa-stop-circle"></i> Cancel Processing';
+}
+
+function hideAdditionalResults() {
+    const additionalResults = document.querySelector('.additional-results');
+    if (additionalResults) {
+        additionalResults.style.display = 'none';
+    }
+}
+
+function showAdditionalResults() {
+    const additionalResults = document.querySelector('.additional-results');
+    if (additionalResults) {
+        additionalResults.style.display = 'block';
     }
 }
 
@@ -111,11 +167,13 @@ function showNotification(message, type = 'error') {
 
     container.appendChild(notification);
 
+    // Ограничиваем количество уведомлений
     const notifications = container.querySelectorAll('.notification');
     if (notifications.length > 3) {
         notifications[0].remove();
     }
 
+    // Автоматическое удаление
     setTimeout(() => {
         if (notification.parentNode) {
             notification.style.animation = 'fadeOut 0.5s ease forwards';
@@ -128,52 +186,18 @@ function showNotification(message, type = 'error') {
     }, 5000);
 }
 
-function updateProgress(progress, message, logs, time) {
-    document.getElementById('progress-fill').style.width = `${progress}%`;
-    document.getElementById('progress-percent').textContent = `${progress}%`;
-    document.getElementById('status-message').textContent = message;
-    document.getElementById('time-counter').textContent = `${time.toFixed(1)}s`;
-
-    const stages = ['preprocess', 'extraction', 'assignment', 'rendering', 'final'];
-    stages.forEach((stage, index) => {
-        const stageElement = document.getElementById(`stage-${stage}`);
-        const stageProgress = (index + 1) * 20;
-
-        if (progress >= stageProgress) {
-            stageElement.classList.add('completed');
-        } else if (progress >= (index * 20)) {
-            stageElement.classList.add('active');
-            stageElement.classList.remove('completed');
-        } else {
-            stageElement.classList.remove('active', 'completed');
-        }
-    });
-
-    const consoleLog = document.getElementById('console-log');
-    logs.forEach(log => {
-        if (!consoleLog.querySelector(`[data-log="${log}"]`)) {
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-            logEntry.textContent = log;
-            logEntry.setAttribute('data-log', log);
-            consoleLog.appendChild(logEntry);
-        }
-    });
-
-    const logEntries = consoleLog.querySelectorAll('.log-entry');
-    if (logEntries.length > 20) {
-        for (let i = 0; i < logEntries.length - 20; i++) {
-            consoleLog.removeChild(logEntries[i]);
-        }
-    }
-
-    consoleLog.scrollTo({
-        top: consoleLog.scrollHeight,
-        behavior: 'smooth'
-    });
+function updateProgress(progress, message, time) {
+    const progressFill = document.getElementById('progress-fill');
+    const progressPercent = document.getElementById('progress-percent');
+    const statusMessage = document.getElementById('status-message');
+    const timeCounter = document.getElementById('time-counter');
+    
+    if (progressFill) progressFill.style.width = `${progress}%`;
+    if (progressPercent) progressPercent.textContent = `${progress}%`;
+    if (statusMessage) statusMessage.textContent = message;
+    if (timeCounter) timeCounter.textContent = `${time.toFixed(1)}s`;
 }
 
-// Функция проверки здоровья сервера
 async function checkServerHealth() {
     try {
         const response = await fetch('/health');
@@ -186,39 +210,33 @@ async function checkServerHealth() {
     }
 }
 
-// Обновите startProcessing с проверкой здоровья
 async function startProcessing() {
-    // Проверяем здоровье сервера перед началом
     const isHealthy = await checkServerHealth();
     if (!isHealthy) {
         showNotification('Server is not responding. Please refresh the page and try again.', 'error');
         return;
     }
+    
     try {
         console.log('Starting processing...');
         
-        // Сбрасываем состояния
         cancelRequested = false;
         
         // Показываем кнопку отмены
         const cancelBtn = document.getElementById('cancel-btn');
-        if (cancelBtn) {
-            cancelBtn.style.display = 'block';
-            cancelBtn.disabled = false;
-            cancelBtn.innerHTML = '<i class="fas fa-stop-circle"></i> Cancel Processing';
-        }
+        cancelBtn.style.display = 'block';
+        cancelBtn.disabled = false;
 
         // Очищаем предыдущую задачу
         await cleanupTask();
         
-        const sourceFile = document.getElementById('source').files[0];
-        const targetFile = document.getElementById('target').files[0];
-
-        if (!sourceFile || !targetFile) {
+        // Проверяем загруженные изображения
+        if (!sourceImageUrl || !targetImageUrl) {
             showNotification('Please upload both source and target images');
             return;
         }
 
+        // Получаем параметры
         const params = {
             size: parseInt(document.getElementById('size').value),
             fps: parseInt(document.getElementById('fps').value),
@@ -228,48 +246,40 @@ async function startProcessing() {
             format: document.getElementById('format').value
         };
 
-        // Client-side validation
-        if (params.size < 32 || params.size > 256) {
-            showNotification('Image size must be between 32 and 256');
-            return;
-        }
-        if (params.fps < 1 || params.fps > 60) {
-            showNotification('FPS must be between 1 and 60');
-            return;
-        }
-        if (params.duration < 0.5 || params.duration > 10) {
-            showNotification('Duration must be between 0.5 and 10 seconds');
-            return;
-        }
-        if (params.scale < 1 || params.scale > 16) {
-            showNotification('Scale must be between 1 and 16');
-            return;
-        }
-        if (params.seed < 0 || params.seed > 999999) {
-            showNotification('Seed must be between 0 and 999999');
+        // Валидация параметров
+        if (!validateParams(params)) {
             return;
         }
 
-        // Create FormData
+        // Конвертируем DataURL в Blob для отправки
+        const sourceBlob = dataURLToBlob(sourceImageUrl);
+        const targetBlob = dataURLToBlob(targetImageUrl);
+        
+        const sourceFile = new File([sourceBlob], 'source.png', { type: 'image/png' });
+        const targetFile = new File([targetBlob], 'target.png', { type: 'image/png' });
+
+        // Подготавливаем FormData
         const formData = new FormData();
         formData.append('source', sourceFile);
         formData.append('target', targetFile);
-        formData.append('size', params.size);
-        formData.append('fps', params.fps);
-        formData.append('duration', params.duration);
-        formData.append('seed', params.seed);
-        formData.append('scale', params.scale);
-        formData.append('format', params.format);
+        Object.entries(params).forEach(([key, value]) => {
+            formData.append(key, value);
+        });
 
-        // Disable process button
+        // Обновляем UI
         const processBtn = document.getElementById('process-btn');
         processBtn.disabled = true;
         processBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
-        // Show loading status
-        updateProgress(5, 'Starting processing...', ['Starting pixel permutation process...'], 0);
+        // Показываем прогресс
+        document.getElementById('animation-preview').style.display = 'none';
+        document.getElementById('preview-progress').style.display = 'block';
+        document.getElementById('animation-result').style.display = 'none';
+        hideAdditionalResults();
+        
+        updateProgress(5, 'Starting processing...', 0);
 
-        // Send request
+        // Отправляем запрос
         console.log('Sending upload request...');
         const response = await fetch('/upload', {
             method: 'POST',
@@ -294,27 +304,54 @@ async function startProcessing() {
     } catch (error) {
         console.error('Start processing error:', error);
         showNotification('Error: ' + error.message);
-        const processBtn = document.getElementById('process-btn');
-        processBtn.disabled = false;
-        processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
-        updateProgress(0, 'Ready to process', ['Error occurred. Ready to try again.'], 0);
-        
-        const cancelBtn = document.getElementById('cancel-btn');
-        if (cancelBtn) cancelBtn.style.display = 'none';
+        resetPreview();
     }
+}
+
+function dataURLToBlob(dataURL) {
+    const parts = dataURL.split(';base64,');
+    const contentType = parts[0].split(':')[1];
+    const raw = window.atob(parts[1]);
+    const uInt8Array = new Uint8Array(raw.length);
+    
+    for (let i = 0; i < raw.length; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+    }
+    
+    return new Blob([uInt8Array], { type: contentType });
+}
+
+function validateParams(params) {
+    const validations = [
+        { check: params.size < 32 || params.size > 256, message: 'Image size must be between 32 and 256' },
+        { check: params.fps < 1 || params.fps > 60, message: 'FPS must be between 1 and 60' },
+        { check: params.duration < 0.5 || params.duration > 10, message: 'Duration must be between 0.5 and 10 seconds' },
+        { check: params.scale < 1 || params.scale > 16, message: 'Scale must be between 1 and 16' },
+        { check: params.seed < 0 || params.seed > 999999, message: 'Seed must be between 0 and 999999' }
+    ];
+
+    for (const validation of validations) {
+        if (validation.check) {
+            showNotification(validation.message);
+            return false;
+        }
+    }
+    return true;
 }
 
 function checkStatus() {
     if (!currentTaskId || cancelRequested) {
         console.log('Status check stopped: no task ID or cancel requested');
-        const cancelBtn = document.getElementById('cancel-btn');
-        if (cancelBtn) cancelBtn.style.display = 'none';
         return;
     }
 
     console.log('Checking status for task:', currentTaskId);
     
-    // Используем интервал вместо рекурсивного setTimeout для лучшего контроля
+    // Очищаем предыдущий интервал
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+    }
+    
     statusCheckInterval = setInterval(async () => {
         if (!currentTaskId || cancelRequested) {
             clearInterval(statusCheckInterval);
@@ -331,73 +368,75 @@ function checkStatus() {
             console.log('Status response:', data);
 
             if (data.status === 'processing') {
-                let adjustedProgress = data.progress;
-                if (data.progress < 30) {
-                    adjustedProgress = data.progress * 0.8;
-                } else if (data.progress < 80) {
-                    adjustedProgress = 24 + (data.progress - 30) * 0.7;
-                } else {
-                    adjustedProgress = 59 + (data.progress - 80) * 2.05;
-                }
-
+                const adjustedProgress = calculateAdjustedProgress(data.progress);
                 updateProgress(
                     adjustedProgress,
                     `Processing... ${data.progress}%`,
-                    data.logs || [],
                     data.time_elapsed || 0
                 );
             } else if (data.status === 'completed') {
                 clearInterval(statusCheckInterval);
-                updateProgress(100, 'Processing complete!', data.logs || [], data.time_elapsed || 0);
-                showResults(data.time_elapsed);
-                const cancelBtn = document.getElementById('cancel-btn');
-                if (cancelBtn) cancelBtn.style.display = 'none';
+                updateProgress(100, 'Processing complete!', data.time_elapsed || 0);
+                setTimeout(() => {
+                    showResults(data.time_elapsed);
+                    scrollToTop();
+                }, 1000);
             } else if (data.status === 'error') {
                 clearInterval(statusCheckInterval);
                 showNotification('Processing error: ' + data.error);
-                const processBtn = document.getElementById('process-btn');
-                processBtn.disabled = false;
-                processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
-                updateProgress(0, 'Ready to process', data.logs || [], data.time_elapsed || 0);
-                const cancelBtn = document.getElementById('cancel-btn');
-                if (cancelBtn) cancelBtn.style.display = 'none';
+                resetPreview();
             }
         } catch (error) {
             console.error('Status check error:', error);
             clearInterval(statusCheckInterval);
             showNotification('Error checking status: ' + error.message);
-            const processBtn = document.getElementById('process-btn');
-            processBtn.disabled = false;
-            processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
-            const cancelBtn = document.getElementById('cancel-btn');
-            if (cancelBtn) cancelBtn.style.display = 'none';
+            resetPreview();
         }
     }, 1000);
 }
 
+function calculateAdjustedProgress(progress) {
+    if (progress < 30) {
+        return progress * 0.8;
+    } else if (progress < 80) {
+        return 24 + (progress - 30) * 0.7;
+    } else {
+        return 59 + (progress - 80) * 2.05;
+    }
+}
+
 function showResults(totalTime) {
-    const resultsSection = document.getElementById('results-section');
-    const resultsGrid = document.getElementById('results-grid');
-    const completionTime = document.getElementById('completion-time');
+    // Показываем основной результат
+    document.getElementById('animation-preview').style.display = 'none';
+    document.getElementById('preview-progress').style.display = 'none';
+    document.getElementById('animation-result').style.display = 'block';
+    
+    const videoElement = document.getElementById('result-video');
+    const downloadBtn = document.getElementById('download-video-btn');
+    
+    videoElement.src = `/result/${currentTaskId}/animation`;
+    downloadBtn.href = `/result/${currentTaskId}/animation`;
+    
+    // Показываем дополнительные результаты
+    showAdditionalResults();
+    populateAdditionalResults();
 
-    completionTime.textContent = `Completed in ${totalTime.toFixed(1)}s`;
+    // Восстанавливаем кнопку процесса
+    const processBtn = document.getElementById('process-btn');
+    processBtn.disabled = false;
+    processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
 
+    // Скрываем кнопку отмены
+    document.getElementById('cancel-btn').style.display = 'none';
+}
+
+function populateAdditionalResults() {
+    const resultsGrid = document.getElementById('additional-results-grid');
+    
     resultsGrid.innerHTML = `
         <div class="result-item">
-            <h3><i class="fas fa-film"></i> Animation</h3>
-            <video controls autoplay loop muted>
-                <source src="/result/${currentTaskId}/animation" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-            <div>
-                <a href="/result/${currentTaskId}/animation" class="download-btn" download>
-                    <i class="fas fa-download"></i> Download MP4
-                </a>
-            </div>
-        </div>
-        <div class="result-item">
             <h3><i class="fas fa-image"></i> Final Reconstructed Image</h3>
-            <img src="/result/${currentTaskId}/final_image" alt="Final reconstructed image">
+            <img src="/result/${currentTaskId}/final_image" alt="Final reconstructed image" onerror="this.style.display='none'">
             <div>
                 <a href="/result/${currentTaskId}/final_image" class="download-btn secondary" download>
                     <i class="fas fa-download"></i> Download PNG
@@ -406,7 +445,7 @@ function showResults(totalTime) {
         </div>
         <div class="result-item">
             <h3><i class="fas fa-chart-bar"></i> Diagnostic Visualization</h3>
-            <img src="/result/${currentTaskId}/diagnostic" alt="Diagnostic visualization">
+            <img src="/result/${currentTaskId}/diagnostic" alt="Diagnostic visualization" onerror="this.style.display='none'">
             <div>
                 <a href="/result/${currentTaskId}/diagnostic" class="download-btn secondary" download>
                     <i class="fas fa-download"></i> Download PNG
@@ -426,78 +465,74 @@ function showResults(totalTime) {
             </div>
         </div>
     `;
+}
 
-    resultsSection.style.display = 'block';
-    const processBtn = document.getElementById('process-btn');
-    processBtn.disabled = false;
-    processBtn.innerHTML = '<i class="fas fa-play-circle"></i> Generate Animation';
-
-    resultsSection.scrollIntoView({ behavior: 'smooth' });
+async function cancelProcessing() {
+    console.log('Cancel requested');
+    
+    cancelRequested = true;
+    const cancelBtn = document.getElementById('cancel-btn');
+    cancelBtn.disabled = true;
+    cancelBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Canceling...';
+    
+    showNotification('Canceling current task...', 'success');
+    
+    // Останавливаем проверку статуса
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = null;
+    }
+    
+    // Очищаем задачу
+    await cleanupTask();
+    
+    // Восстанавливаем UI
+    cancelRequested = false;
+    resetPreview();
+    hideAdditionalResults();
+    
+    showNotification('Processing canceled', 'success');
 }
 
 function cleanupTask() {
     return new Promise((resolve) => {
-        console.log('Starting cleanup task, currentTaskId:', currentTaskId);
-        
-        // Останавливаем проверку статуса
-        if (statusCheckInterval) {
-            clearInterval(statusCheckInterval);
-            statusCheckInterval = null;
-        }
-
-        if (currentTaskId) {
-            const taskIdToCleanup = currentTaskId;
-            console.log('Cleaning up task:', taskIdToCleanup);
-            
-            fetch(`/cleanup/${taskIdToCleanup}`, { method: 'DELETE' })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Cleanup response:', data);
-                    if (currentTaskId === taskIdToCleanup) {
-                        currentTaskId = null;
-                    }
-                    resolve();
-                })
-                .catch(error => {
-                    console.error('Cleanup error:', error);
-                    // Все равно разрешаем промис даже при ошибке
-                    if (currentTaskId === taskIdToCleanup) {
-                        currentTaskId = null;
-                    }
-                    resolve();
-                });
-        } else {
-            console.log('No current task to clean up');
+        if (!currentTaskId) {
             resolve();
+            return;
         }
+        
+        console.log('Cleaning up task:', currentTaskId);
+        const taskIdToCleanup = currentTaskId;
+        
+        fetch(`/cleanup/${taskIdToCleanup}`, { method: 'DELETE' })
+            .then(response => {
+                if (!response.ok) {
+                    console.warn('Cleanup request failed');
+                }
+                return response.json().catch(() => ({}));
+            })
+            .then(data => {
+                console.log('Cleanup completed for task:', taskIdToCleanup);
+                if (currentTaskId === taskIdToCleanup) {
+                    currentTaskId = null;
+                }
+                resolve();
+            })
+            .catch(error => {
+                console.error('Cleanup error:', error);
+                if (currentTaskId === taskIdToCleanup) {
+                    currentTaskId = null;
+                }
+                resolve();
+            });
     });
 }
 
-async function cleanup() {
-    showNotification('Cleaning up previous task...', 'success');
-    await cleanupTask();
-
-    currentTaskId = null;
-    cancelRequested = false;
-    document.getElementById('results-section').style.display = 'none';
-    updateProgress(0, 'Ready to process', ['System ready. Upload images and click "Generate Animation" to start.'], 0);
-
-    document.querySelectorAll('.stage').forEach(stage => {
-        stage.classList.remove('active', 'completed');
+function scrollToTop() {
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
     });
-
-    document.getElementById('source').value = '';
-    document.getElementById('target').value = '';
-
-    const cancelBtn = document.getElementById('cancel-btn');
-    if (cancelBtn) cancelBtn.style.display = 'none';
-
-    showNotification('Ready for new generation', 'success');
 }
 
 // Периодическая проверка здоровья сервера
@@ -505,10 +540,9 @@ setInterval(async () => {
     const isHealthy = await checkServerHealth();
     if (!isHealthy) {
         console.warn('Server health check failed');
-        // Можно показать предупреждение пользователю
         const statusElement = document.getElementById('status-message');
         if (statusElement && statusElement.textContent.includes('Ready')) {
             statusElement.innerHTML = 'Server connection issues <span class="loading-dots"><span></span><span></span><span></span></span>';
         }
     }
-}, 30000); // Проверяем каждые 30 секунд
+}, 30000);

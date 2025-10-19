@@ -335,9 +335,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     print("🎨 Pixel Permutation MVP Web Interface")
-    print("🚀 Starting server...")
     print(f"📡 Access at: http://localhost:{args.port}")
-    print("💡 Make sure to upload both source and target images!")
-    print("⏳ First run might take a moment to process...")
     
     app.run(debug=True, host=args.host, port=args.port)
