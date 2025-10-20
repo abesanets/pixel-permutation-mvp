@@ -4,9 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PixelFlow | AI Pixel Animation</title>
+    <title>PixelFlow</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
 </head>
 
 <body>
@@ -44,7 +45,7 @@
                     <div class="preview-progress" id="preview-progress" style="display: none;">
                         <div class="progress-container">
                             <div class="progress-header">
-                                <span class="progress-label">Generating Animation</span>
+                                <span class="progress-label">Generating</span>
                             </div>
                             <div class="progress-bar">
                                 <div id="progress-fill" class="progress-fill">

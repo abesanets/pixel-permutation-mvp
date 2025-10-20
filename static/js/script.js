@@ -736,6 +736,37 @@ function toggleScaleOptions() {
     }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    // Список всех элементов настроек
+    const settingsElements = {
+        size: document.getElementById('size'),
+        fps: document.getElementById('fps'),
+        duration: document.getElementById('duration'),
+        scale: document.getElementById('scale'),
+        seed: document.getElementById('seed'),
+        format: document.getElementById('format')
+    };
+
+    // Загрузка настроек из localStorage
+    const savedSettings = JSON.parse(localStorage.getItem('pixelflowSettings') || '{}');
+    for (const key in settingsElements) {
+        if (savedSettings[key] !== undefined) {
+            settingsElements[key].value = savedSettings[key];
+        }
+    }
+
+    // Сохранение настроек при изменении
+    for (const key in settingsElements) {
+        settingsElements[key].addEventListener('change', () => {
+            const currentSettings = {};
+            for (const k in settingsElements) {
+                currentSettings[k] = settingsElements[k].value;
+            }
+            localStorage.setItem('pixelflowSettings', JSON.stringify(currentSettings));
+        });
+    }
+});
+
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', function() {
     const sizeSelect = document.getElementById('size');
