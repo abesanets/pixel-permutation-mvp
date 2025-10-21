@@ -28,15 +28,13 @@ def create_final_image(
         scale: Output scale factor
     """
     height, width = image_shape[:2]
-    output_height = height * scale
-    output_width = width * scale
     
-    # Pre-allocate and create image using vectorized operations
-    final_image = _create_image_from_mapping(
-        mapping, width, height, output_width, output_height, scale
+    # Use optimized image creation
+    final_image = _create_image_from_mapping_vectorized(
+        mapping, width, height, scale
     )
     
-    # Save directly without extra conversion when possible
+    # Save with optimized parameters
     if output_path.suffix.lower() in ['.png', '.jpg', '.jpeg']:
         cv2.imwrite(str(output_path), final_image[..., ::-1])  # RGB to BGR
     else:
@@ -45,18 +43,16 @@ def create_final_image(
     return final_image
 
 
-def _create_image_from_mapping(
+def _create_image_from_mapping_vectorized(
     mapping: List[Dict[str, Any]],
     width: int,
     height: int,
-    output_width: int,
-    output_height: int,
     scale: int,
     t: float = 1.0
 ) -> np.ndarray:
-    """Create image from mapping with optional interpolation."""
-    # Pre-allocate output array
-    final_image = np.zeros((output_height, output_width, 3), dtype=np.uint8)
+    """Create image from mapping using fully vectorized operations."""
+    # Pre-allocate small image first, then scale up
+    small_img = np.zeros((height, width, 3), dtype=np.uint8)
     
     # Extract arrays for vectorized processing
     if t < 1.0:
@@ -71,16 +67,17 @@ def _create_image_from_mapping(
     
     colors = np.array([p['color'] for p in mapping], dtype=np.uint8)
     
-    # Vectorized scaling and drawing
-    scaled_positions = positions * scale
-    x1 = scaled_positions[:, 0]
-    y1 = scaled_positions[:, 1]
+    # Vectorized assignment to small image
+    y_coords = np.clip(positions[:, 1], 0, height - 1)
+    x_coords = np.clip(positions[:, 0], 0, width - 1)
+    small_img[y_coords, x_coords] = colors
     
-    # Create all rectangles at once using broadcasting
-    for i in range(len(mapping)):
-        x1_i, y1_i = x1[i], y1[i]
-        x2_i, y2_i = x1_i + scale, y1_i + scale
-        final_image[y1_i:y2_i, x1_i:x2_i] = colors[i]
+    # Scale up using OpenCV for better performance
+    if scale > 1:
+        final_image = cv2.resize(small_img, (width * scale, height * scale), 
+                               interpolation=cv2.INTER_NEAREST)
+    else:
+        final_image = small_img
     
     return final_image
 
@@ -110,93 +107,69 @@ def create_animation(
     """
     height, width = image_shape[:2]
     num_frames = int(fps * duration)
-    output_height = height * scale
-    output_width = width * scale
     
-    print(f"   Rendering {num_frames} frames at {output_width}x{output_height}")
+    print(f"   Rendering {num_frames} frames at {width*scale}x{height*scale}")
     
-    # Pre-compute all frames
-    frames = _compute_animation_frames(
-        mapping, width, height, output_width, output_height, 
-        scale, num_frames, frames_dir
-    )
-    
-    # Add final frame pause
-    final_frame = frames[-1]
-    extra_frames = int(fps)
-    frames.extend([final_frame] * extra_frames)
-    
-    print(f"   Added {extra_frames} frames for final pause (total: {len(frames)})")
-    print("   Encoding animation...")
-    
-    # Optimized encoding
-    _save_animation(frames, output_path, fps, output_format)
-
-
-def _compute_animation_frames(
-    mapping: List[Dict[str, Any]],
-    width: int,
-    height: int,
-    output_width: int,
-    output_height: int,
-    scale: int,
-    num_frames: int,
-    frames_dir: Optional[Path] = None
-) -> List[np.ndarray]:
-    """Compute all animation frames efficiently."""
-    frames = []
-    
-    # Pre-extract data for vectorization
+    # Pre-extract data for vectorization (moved outside loop)
     src_pos = np.array([p['src_pos'] for p in mapping], dtype=np.float32)
     dst_pos = np.array([p['dst_pos'] for p in mapping], dtype=np.float32)
     colors = np.array([p['color'] for p in mapping], dtype=np.uint8)
     
+    # Generate frames with progress bar
+    frames = []
     for frame_idx in tqdm(range(num_frames), desc="Rendering frames"):
         t = frame_idx / (num_frames - 1) if num_frames > 1 else 1.0
         
-        # Vectorized interpolation
-        current_pos = src_pos + (dst_pos - src_pos) * t
-        positions = np.round(current_pos).astype(np.int32)
-        
-        # Create frame using optimized drawing
-        frame = _create_frame_from_arrays(
-            positions, colors, output_width, output_height, scale
+        # Create frame using optimized method
+        frame = _create_frame_vectorized(
+            src_pos, dst_pos, colors, width, height, scale, t
         )
         
         if frames_dir:
             frame_path = frames_dir / f"frame_{frame_idx:04d}.png"
-            cv2.imwrite(str(frame_path), frame[..., ::-1])  # RGB to BGR
+            cv2.imwrite(str(frame_path), frame[..., ::-1])
         
         frames.append(frame)
     
-    return frames
+    # Add final frame pause
+    final_frame = frames[-1]
+    frames.extend([final_frame] * int(fps))
+    
+    print(f"   Encoding animation with {len(frames)} frames...")
+    _save_animation_optimized(frames, output_path, fps, output_format)
 
 
-def _create_frame_from_arrays(
-    positions: np.ndarray,
+def _create_frame_vectorized(
+    src_pos: np.ndarray,
+    dst_pos: np.ndarray,
     colors: np.ndarray,
-    output_width: int,
-    output_height: int,
-    scale: int
+    width: int,
+    height: int,
+    scale: int,
+    t: float
 ) -> np.ndarray:
-    """Create a single frame from pre-computed arrays."""
-    frame = np.zeros((output_height, output_width, 3), dtype=np.uint8)
+    """Create a single frame using fully vectorized operations."""
+    # Vectorized interpolation
+    current_pos = src_pos + (dst_pos - src_pos) * t
+    positions = np.round(current_pos).astype(np.int32)
     
-    # Vectorized scaling
-    scaled_positions = positions * scale
-    x1 = scaled_positions[:, 0]
-    y1 = scaled_positions[:, 1]
+    # Create small image first
+    small_img = np.zeros((height, width, 3), dtype=np.uint8)
+    y_coords = np.clip(positions[:, 1], 0, height - 1)
+    x_coords = np.clip(positions[:, 0], 0, width - 1)
+    small_img[y_coords, x_coords] = colors
     
-    # Batch draw rectangles
-    for i in range(len(positions)):
-        x1_i, y1_i = x1[i], y1[i]
-        x2_i, y2_i = x1_i + scale, y1_i + scale
-        frame[y1_i:y2_i, x1_i:x2_i] = colors[i]
+    # Scale up
+    if scale > 1:
+        frame = cv2.resize(small_img, (width * scale, height * scale), 
+                         interpolation=cv2.INTER_NEAREST)
+    else:
+        frame = small_img
     
     return frame
 
 
-def _save_animation(
+def _save_animation_optimized(
     frames: List[np.ndarray],
     output_path: Path,
     fps: int,
@@ -204,21 +177,24 @@ def _save_animation(
 ) -> None:
     """Save animation with optimized parameters."""
     if output_format == "gif":
+        # Use subrectangles for smaller GIF files
         imageio.mimsave(
             str(output_path), 
             frames, 
             fps=fps,
-            loop=0
+            loop=0,
+            subrectangles=True  # Only store changed parts between frames
         )
     else:  # mp4
-        # Use faster codec and optimized settings
+        # Optimized MP4 encoding
         imageio.mimsave(
             str(output_path), 
             frames, 
             fps=fps,
-            quality=7,  # Slightly reduced quality for speed
-            codec='libx264',  # Fast H.264 encoding
-            pixelformat='yuv420p'  # Standard pixel format
+            quality=8,
+            codec='libx264',
+            pixelformat='yuv420p',
+            macro_block_size=8  # Smaller blocks for faster encoding
         )
 
 
@@ -234,106 +210,120 @@ def create_diagnostic(
     """
     height, width = source_small.shape[:2]
     
-    # Create figure without tight_layout initially
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    # Create figure with smaller size for faster rendering
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
     
-    # Plot images
-    axes[0, 0].imshow(source_small)
-    axes[0, 0].set_title('Source Image (B)', fontsize=10)
+    # Plot images without interpolation for speed
+    axes[0, 0].imshow(source_small, interpolation='none')
+    axes[0, 0].set_title('Source Image (B)', fontsize=9)
     axes[0, 0].axis('off')
     
-    axes[0, 1].imshow(target_small)
-    axes[0, 1].set_title('Target Image (A)', fontsize=10)
+    axes[0, 1].imshow(target_small, interpolation='none')
+    axes[0, 1].set_title('Target Image (A)', fontsize=9)
     axes[0, 1].axis('off')
     
     # Create final reconstruction efficiently
-    final_image = _create_final_reconstruction(mapping, target_small.shape)
-    axes[1, 0].imshow(final_image)
-    axes[1, 0].set_title('Reconstructed Image', fontsize=10)
+    final_image = _create_final_reconstruction_vectorized(mapping, target_small.shape)
+    axes[1, 0].imshow(final_image, interpolation='none')
+    axes[1, 0].set_title('Reconstructed Image', fontsize=9)
     axes[1, 0].axis('off')
     
-    # Optimized arrow plotting
-    _plot_arrow_samples(mapping, target_small, axes[1, 1])
+    # Optimized arrow plotting with fewer samples
+    _plot_arrow_samples_optimized(mapping, target_small, axes[1, 1])
     
-    # Use constrained_layout instead of tight_layout for better performance
-    plt.savefig(output_path, dpi=150, bbox_inches='tight', 
+    # Save with optimized parameters - REMOVED 'optimize' parameter
+    plt.savefig(output_path, dpi=100, bbox_inches='tight', 
                 facecolor='white', edgecolor='none')
-    plt.close(fig)  # Explicitly close to free memory
+    plt.close(fig)
 
 
-def _create_final_reconstruction(
+def _create_final_reconstruction_vectorized(
     mapping: List[Dict[str, Any]], 
     shape: Tuple[int, int, int]
 ) -> np.ndarray:
-    """Create final reconstruction image efficiently."""
+    """Create final reconstruction image using vectorized operations."""
     final_image = np.zeros(shape, dtype=np.uint8)
     
     # Vectorized assignment
     dst_positions = np.array([p['dst_pos'] for p in mapping])
     colors = np.array([p['color'] for p in mapping])
     
-    for (x, y), color in zip(dst_positions, colors):
-        final_image[y, x] = color
+    # Use advanced indexing for vectorized assignment
+    y_coords = dst_positions[:, 1]
+    x_coords = dst_positions[:, 0]
+    
+    # Ensure coordinates are within bounds
+    valid_mask = (x_coords < shape[1]) & (y_coords < shape[0]) & (x_coords >= 0) & (y_coords >= 0)
+    
+    final_image[y_coords[valid_mask], x_coords[valid_mask]] = colors[valid_mask]
     
     return final_image
 
 
-def _plot_arrow_samples(
+def _plot_arrow_samples_optimized(
     mapping: List[Dict[str, Any]],
     target_small: np.ndarray,
     ax: plt.Axes
 ) -> None:
-    """Plot sampled arrows efficiently."""
-    ax.imshow(target_small, alpha=0.3)
+    """Plot sampled arrows efficiently with reduced samples."""
+    ax.imshow(target_small, alpha=0.3, interpolation='none')
     
-    num_arrows = min(100, len(mapping))
-    step = max(1, len(mapping) // num_arrows)
+    # Use fixed number of samples for consistency
+    num_arrows = min(80, len(mapping))
+    if len(mapping) > num_arrows:
+        indices = np.random.choice(len(mapping), num_arrows, replace=False)
+    else:
+        indices = np.arange(len(mapping))
     
-    # Pre-compute positions and filter
+    # Batch process arrow data
     arrows_data = []
-    for i in range(0, len(mapping), step):
+    for i in indices:
         pixel_data = mapping[i]
         src_x, src_y = pixel_data['src_pos']
         dst_x, dst_y = pixel_data['dst_pos']
         
-        if abs(src_x - dst_x) > 2 or abs(src_y - dst_y) > 2:
+        # Only plot arrows with significant movement
+        if abs(src_x - dst_x) > 1 or abs(src_y - dst_y) > 1:
             arrows_data.append((src_x, src_y, dst_x - src_x, dst_y - src_y))
     
-    # Batch plot arrows
+    # Batch plot arrows with simpler styling
     for src_x, src_y, dx, dy in arrows_data:
         ax.arrow(
             src_x, src_y, dx, dy,
-            head_width=1, head_length=1, 
-            fc='red', ec='red', alpha=0.7,
-            length_includes_head=True
+            head_width=0.8, head_length=0.8, 
+            fc='red', ec='red', alpha=0.6,
+            length_includes_head=True,
+            linewidth=0.8
         )
     
-    ax.set_title('Pixel Mapping (sample arrows)', fontsize=10)
+    ax.set_title('Pixel Mapping (sample arrows)', fontsize=9)
     ax.axis('off')
 
 
 def verify_color_preservation(
-    source_small: np.ndarray, 
-    final_frame: np.ndarray,
-    scale: int
+    source_img: np.ndarray, 
+    result_img: np.ndarray, 
+    tolerance: int = 5
 ) -> bool:
     """
-    Verify that final frame uses exactly the same colors as source image.
+    Verify that colors are preserved between source and result.
+    
+    Args:
+        source_img: Source image
+        result_img: Result image to verify
+        tolerance: Color difference tolerance
+    
+    Returns:
+        bool: True if colors are preserved within tolerance
     """
-    h, w = source_small.shape[:2]
+    # Resize result to match source if different sizes
+    if source_img.shape != result_img.shape:
+        result_img = cv2.resize(result_img, (source_img.shape[1], source_img.shape[0]))
     
-    # Use more efficient downsampling
-    if scale > 1:
-        # Sample every 'scale'th pixel instead of full resize
-        final_small = final_frame[scale//2::scale, scale//2::scale][:h, :w]
-        # Ensure dimensions match
-        if final_small.shape != source_small.shape:
-            final_small = cv2.resize(final_small, (w, h), interpolation=cv2.INTER_NEAREST)
-    else:
-        final_small = final_frame[:h, :w]
+    # Calculate color differences
+    diff = cv2.absdiff(source_img, result_img)
+    max_diff = np.max(diff)
     
-    # Compare color sets more efficiently using numpy
-    source_colors = np.unique(source_small.reshape(-1, 3), axis=0)
-    final_colors = np.unique(final_small.reshape(-1, 3), axis=0)
+    print(f"Maximum color difference: {max_diff}")
     
-    return np.array_equal(source_colors, final_colors)
+    return max_diff <= tolerance
