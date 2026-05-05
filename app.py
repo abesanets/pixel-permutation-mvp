@@ -230,7 +230,8 @@ def cleanup_task(task_id):
         
         # Очищаем загруженные файлы, связанные с этой задачей
         import glob
-        upload_pattern = str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}*")
+        upload_pattern = str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.png")
+        upload_pattern += "," + str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.jpg")
         upload_files = glob.glob(upload_pattern)
         for file_path in upload_files:
             try:
@@ -285,7 +286,7 @@ def upload_files():
             return jsonify({'error': 'Invalid file type'}), 400
         
         # Generate task ID first
-        task_id = f"task_{len(processing_status)}_{os.urandom(4).hex()}"
+        task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
         print(f"Generated new task ID: {task_id}")
         
         # Save uploaded files
