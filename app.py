@@ -230,9 +230,9 @@ def cleanup_task(task_id):
         
         # Очищаем загруженные файлы, связанные с этой задачей
         import glob
-        upload_pattern = str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.png")
-        upload_pattern += "," + str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.jpg")
-        upload_files = glob.glob(upload_pattern)
+        upload_pattern_png = str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.png")
+        upload_pattern_jpg = str(Path(app.config['UPLOAD_FOLDER']) / f"*{task_id}.jpg")
+        upload_files = glob.glob(upload_pattern_png) + glob.glob(upload_pattern_jpg)
         for file_path in upload_files:
             try:
                 os.remove(file_path)
